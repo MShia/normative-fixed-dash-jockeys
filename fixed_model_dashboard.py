@@ -575,7 +575,7 @@ def generate_word_report(all_results, demographics):
             ('Raw Score', f"{result['actual_score']:.2f}"),
             ('Best Percentile (Method)', f"{result['best_percentile']:.0f}th ({result['best_method']})"),
             ('Clinical Interpretation', result['interpretation']),
-            ('Flag Status (Threshold)', f"{result['flag_status']} (< {result['threshold']}th percentile)"),
+            ('Flag Status (Threshold)', f"(< {result['threshold']}th percentile)"),
             ('Method Agreement', f"{result['agreement_level']} ({result['agreement_ratio']})")
         ]
         
