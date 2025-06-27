@@ -1,0 +1,70 @@
+{
+  "DSF_raw": {
+    "input_dim": 3,
+    "feature_names": [
+      "age",
+      "sex",
+      "education"
+    ],
+    "score_range": [
+      5.0,
+      16.0
+    ],
+    "sample_size": 1935,
+    "training_date": "2025-06-25",
+    "mean_score": 10.223772609819122,
+    "std_score": 2.2011215600234726,
+    "excluded_samples": 4
+  },
+  "DSB_raw": {
+    "input_dim": 3,
+    "feature_names": [
+      "age",
+      "sex",
+      "education"
+    ],
+    "score_range": [
+      3.0,
+      14.0
+    ],
+    "sample_size": 1898,
+    "training_date": "2025-06-25",
+    "mean_score": 5.827186512118019,
+    "std_score": 1.9045927312116475,
+    "excluded_samples": 41
+  },
+  "SOC_raw": {
+    "input_dim": 3,
+    "feature_names": [
+      "age",
+      "sex",
+      "education"
+    ],
+    "score_range": [
+      11.0,
+      100.0
+    ],
+    "sample_size": 1938,
+    "training_date": "2025-06-25",
+    "mean_score": 55.32249742002064,
+    "std_score": 16.604286897439362,
+    "excluded_samples": 1
+  },
+  "SDMT_raw": {
+    "input_dim": 3,
+    "feature_names": [
+      "age",
+      "sex",
+      "education"
+    ],
+    "score_range": [
+      15.0,
+      100.0
+    ],
+    "sample_size": 1932,
+    "training_date": "2025-06-25",
+    "mean_score": 51.070910973084885,
+    "std_score": 10.46884567541245,
+    "excluded_samples": 7
+  }
+}

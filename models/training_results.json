@@ -1,0 +1,98 @@
+{
+  "DSF_raw": {
+    "train_size": 1354,
+    "val_size": 194,
+    "test_size": 387,
+    "complete_cases": 1935,
+    "excluded_cases": 4,
+    "lr": {
+      "mse": 5.038467568110998,
+      "mae": 1.7701634507088002,
+      "r_squared": 0.037240979110188976
+    },
+    "lqr": {
+      "mean_mse": 10.428050448019233,
+      "quantiles_trained": 99
+    },
+    "nnqr": {
+      "mse": 5.156866550445557,
+      "mae": 1.7919615507125854,
+      "coverage_error": 0.03573721713256598,
+      "final_train_loss": 0.5901941220427669,
+      "final_val_loss": 0.624556839466095,
+      "epochs_trained": 74
+    }
+  },
+  "DSB_raw": {
+    "train_size": 1328,
+    "val_size": 190,
+    "test_size": 380,
+    "complete_cases": 1898,
+    "excluded_cases": 41,
+    "lr": {
+      "mse": 3.674730470726855,
+      "mae": 1.5361100987195042,
+      "r_squared": 0.05365475507191031
+    },
+    "lqr": {
+      "mean_mse": 6.555104853849111,
+      "quantiles_trained": 99
+    },
+    "nnqr": {
+      "mse": 4.049983501434326,
+      "mae": 1.514854073524475,
+      "coverage_error": 0.030451887293992577,
+      "final_train_loss": 0.4907194525003433,
+      "final_val_loss": 0.5651106834411621,
+      "epochs_trained": 59
+    }
+  },
+  "SOC_raw": {
+    "train_size": 1356,
+    "val_size": 194,
+    "test_size": 388,
+    "complete_cases": 1938,
+    "excluded_cases": 1,
+    "lr": {
+      "mse": 293.0876744835425,
+      "mae": 13.825438888683625,
+      "r_squared": 0.13479182632469822
+    },
+    "lqr": {
+      "mean_mse": 568.94340987515,
+      "quantiles_trained": 99
+    },
+    "nnqr": {
+      "mse": 239.8640899658203,
+      "mae": 12.202066421508789,
+      "coverage_error": 0.054049776111631795,
+      "final_train_loss": 4.351447011149207,
+      "final_val_loss": 4.525608539581299,
+      "epochs_trained": 62
+    }
+  },
+  "SDMT_raw": {
+    "train_size": 1351,
+    "val_size": 194,
+    "test_size": 387,
+    "complete_cases": 1932,
+    "excluded_cases": 7,
+    "lr": {
+      "mse": 127.46616195685638,
+      "mae": 8.86721204180036,
+      "r_squared": 0.09780853000614376
+    },
+    "lqr": {
+      "mean_mse": 259.0737602303019,
+      "quantiles_trained": 99
+    },
+    "nnqr": {
+      "mse": 114.10893249511719,
+      "mae": 8.287004470825195,
+      "coverage_error": 0.023971497924986294,
+      "final_train_loss": 2.717879608620045,
+      "final_val_loss": 2.7290761470794678,
+      "epochs_trained": 136
+    }
+  }
+}

@@ -1,0 +1,35 @@
+NEUROPSYCHOLOGICAL NORMATIVE MODELS - TRAINING SUMMARY
+============================================================
+
+Training Date: 2025-06-25 14:28:13
+Total Test Scores: 4
+Covariates: age, sex, education
+Quantiles: 99
+
+MODEL PERFORMANCE SUMMARY:
+------------------------------
+
+DSF_raw:
+  LR  - MSE: 5.038
+  LQR - MSE: 10.428
+  NNQR- MSE: 5.157
+
+DSB_raw:
+  LR  - MSE: 3.675
+  LQR - MSE: 6.555
+  NNQR- MSE: 4.050
+
+SOC_raw:
+  LR  - MSE: 293.088
+  LQR - MSE: 568.943
+  NNQR- MSE: 239.864
+
+SDMT_raw:
+  LR  - MSE: 127.466
+  LQR - MSE: 259.074
+  NNQR- MSE: 114.109
+
+COVERAGE DATA:
+---------------
+Coverage data computed for 4 test scores
+This data enables optimal method selection in the dashboard
