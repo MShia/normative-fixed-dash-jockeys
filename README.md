@@ -24,7 +24,7 @@ pip install streamlit pandas numpy torch scipy python-docx
 ### Installation
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/neuropsych-calculator.git
+git clone (https://github.com/MShia/normative-fixed-dash-jockeys.git)
 cd neuropsych-calculator
 ```
 
