@@ -189,6 +189,48 @@ st.markdown("""
         margin: 0;
     }
     
+    /* Tooltip styling */
+    .tooltip-container {
+        position: relative;
+        display: inline-block;
+        cursor: help;
+    }
+    
+    .tooltip-text {
+        visibility: hidden;
+        width: 250px;
+        background-color: #333;
+        color: #fff;
+        text-align: left;
+        border-radius: 6px;
+        padding: 8px 10px;
+        position: absolute;
+        z-index: 1;
+        bottom: 125%;
+        left: 0;
+        margin-left: -10px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        font-size: 0.85rem;
+        line-height: 1.4;
+    }
+    
+    .tooltip-text::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: 20px;
+        margin-left: -5px;
+        border-width: 5px;
+        border-style: solid;
+        border-color: #333 transparent transparent transparent;
+    }
+    
+    .tooltip-container:hover .tooltip-text {
+        visibility: visible;
+        opacity: 1;
+    }
+    
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -370,7 +412,7 @@ class ModelManager:
             return 0.01
     
     def calculate_percentile_with_best_method(self, score, actual_score, features):
-        """Calculate percentile using all methods and select best based on coverage offset"""
+        """Estimate percentile using all methods and select best based on coverage offset"""
         results = {}
         offsets = {}
         
@@ -662,7 +704,20 @@ def main():
     with col1:
         st.markdown(f'<div style="padding-top: 0.5rem;">{logo_svg}</div>', unsafe_allow_html=True)
     with col2:
-        st.markdown('<div class="main-header">Neuropsychological Percentile Estimation : Irish Jockeys Data</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">Neuropsychological Percentile Estimation </div>', unsafe_allow_html=True)
+    
+    # Research description
+    st.markdown("""
+    <div style="background-color: #e8f4f8; border-left: 4px solid #1f77b4; padding: 1rem; 
+                border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.95rem;">
+        <strong>📚 About this Research Tool:</strong><br>
+       This dashboard resulted from research funding by HRB Ireland’s Secondary Data Analysis Grant, presents regression-based normative models 
+        for neuropsychological tests in Irish jockeys (2010–2024) to support concussion assessment. Percentile estimates 
+        are generated using age, sex, and education via three methods: Linear Regression (LR), 
+        Linear Quantile Regression (LQR), and Neural Network Quantile Regression (NNQR). The best estimate 
+        is selected based on empirical coverage offset, and agreement confidence reflects consistency across the three methods.
+        </div>
+    """, unsafe_allow_html=True)
     
     # Load models
     model_manager = load_model_manager()
@@ -701,12 +756,44 @@ def main():
         """, unsafe_allow_html=True)
         
         st.markdown("### 📊 Available Tests")
-        st.markdown("""
-        - **DSF**: Digit Span Forward
-        - **DSB**: Digit Span Backward  
-        - **SOC**: Speed of Comprehension
-        - **SDMT**: Symbol Digit Modalities
-        """)
+        
+        # Test descriptions with tooltips
+        test_descriptions = {
+            "DSF": "A test of short-term memory where individuals repeat a sequence of numbers in the same order as presented.",
+            "DSB": "A test of working memory that requires individuals to repeat a sequence of numbers in reverse order.",
+            "SOC": "A test measuring how quickly and accurately a person can understand and respond to simple written information.",
+            "SDMT": "A test assessing attention, visual scanning, and processing speed, where individuals match symbols to numbers using a reference key."
+        }
+        
+        # Display tests with tooltips
+        st.markdown(f"""
+        <ul style="list-style-type: none; padding-left: 0;">
+            <li style="margin-bottom: 0.5rem;">
+                <div class="tooltip-container">
+                    <strong>DSF</strong>: Digit Span Forward
+                    <span class="tooltip-text">{test_descriptions['DSF']}</span>
+                </div>
+            </li>
+            <li style="margin-bottom: 0.5rem;">
+                <div class="tooltip-container">
+                    <strong>DSB</strong>: Digit Span Backward
+                    <span class="tooltip-text">{test_descriptions['DSB']}</span>
+                </div>
+            </li>
+            <li style="margin-bottom: 0.5rem;">
+                <div class="tooltip-container">
+                    <strong>SOC</strong>: Speed of Comprehension
+                    <span class="tooltip-text">{test_descriptions['SOC']}</span>
+                </div>
+            </li>
+            <li style="margin-bottom: 0.5rem;">
+                <div class="tooltip-container">
+                    <strong>SDMT</strong>: Symbol Digit Modalities
+                    <span class="tooltip-text">{test_descriptions['SDMT']}</span>
+                </div>
+            </li>
+        </ul>
+        """, unsafe_allow_html=True)
         
         st.markdown(f"<small>✅ {len(model_manager.available_scores)} models loaded</small>", unsafe_allow_html=True)
         
@@ -749,6 +836,18 @@ def main():
     # Input section
     st.markdown('<div class="section-header">📝 Test Configuration</div>', unsafe_allow_html=True)
     
+    # Define score ranges for each test
+    score_ranges = {
+        'dsf_raw': {'min': 5, 'max': 16},
+        'DSF_raw': {'min': 5, 'max': 16},
+        'dsb_raw': {'min': 3, 'max': 14},
+        'DSB_raw': {'min': 3, 'max': 14},
+        'soc_raw': {'min': 11, 'max': 100},
+        'SOC_raw': {'min': 11, 'max': 100},
+        'sdmt_raw': {'min': 15, 'max': 100},
+        'SDMT_raw': {'min': 15, 'max': 100}
+    }
+    
     col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
     
     with col1:
@@ -759,10 +858,17 @@ def main():
         )
     
     with col2:
+        # Get the range for the selected test
+        min_score = score_ranges.get(selected_score, {}).get('min', 0)
+        max_score = score_ranges.get(selected_score, {}).get('max', 100)
+        
         actual_score = st.number_input(
             "Actual Score",
+            min_value=float(min_score),
+            max_value=float(max_score),
+            value=float(min_score),
             step=0.01,
-            help="Enter the raw test score"
+            help=f"Enter raw test score (Range: {min_score} - {max_score})"
         )
     
     with col3:
@@ -776,7 +882,7 @@ def main():
         )
     
     with col4:
-        calculate_btn = st.button("🚀 Calculate", type="primary", use_container_width=True)
+        calculate_btn = st.button("🚀 Estimate", type="primary", use_container_width=True)
     
     # Results section
     if calculate_btn and actual_score is not None:
@@ -807,7 +913,7 @@ def main():
                     'threshold': threshold
                 }
             else:
-                st.error("❌ Unable to calculate percentiles. Please check your inputs.")
+                st.error("❌ Unable to estimate percentiles. Please check your inputs.")
     
     # Display results if they exist in session state
     if 'current_results' in st.session_state and st.session_state.current_results:
@@ -954,7 +1060,7 @@ def main():
         with col1:
             st.markdown("""
             <div class="info-box">
-            <strong>1. Demographics</strong><br>
+            <strong>Step 1. Demographics</strong><br>
             Enter subject details in the sidebar
             </div>
             """, unsafe_allow_html=True)
@@ -962,7 +1068,7 @@ def main():
         with col2:
             st.markdown("""
             <div class="info-box">
-            <strong>2. Test Settings</strong><br>
+            <strong>Step 2. Test Settings</strong><br>
             Select test and set threshold above
             </div>
             """, unsafe_allow_html=True)
@@ -970,8 +1076,8 @@ def main():
         with col3:
             st.markdown("""
             <div class="info-box">
-            <strong>3. Calculate</strong><br>
-            Enter score and click Calculate
+            <strong>Step 3. Estimate</strong><br>
+            Enter score and click Estimate
             </div>
             """, unsafe_allow_html=True)
     
