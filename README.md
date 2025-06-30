@@ -1,6 +1,6 @@
-# 🧠 Neuropsychological Normative Calculator
+# 🧠 Neuropsychological Normative Estimator
 
-A professional web application for calculating demographic-adjusted normative percentiles in neuropsychological assessments. Built with Streamlit for clinicians and researchers to complement the exisiting concussion protocols. The trained models are fixed and based on the Retrospective Data of Irish Horse Jockeys from 2010 - 2024. For using own data the training script can be used to train and save the models. 
+A professional web application for estimating demographic-adjusted normative percentiles in neuropsychological assessments. Built with Streamlit for clinicians and researchers to complement the exisiting concussion protocols. The trained models are fixed and based on the Retrospective Data of Irish Horse Jockeys from 2010 - 2024. For using own data the training script can be used to train and save the models. 
 
 ## 🎯 What It Does
 
