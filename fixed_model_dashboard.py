@@ -1,6 +1,6 @@
 """
 Neuropsychological Normative Calculator
-Requirements: pip install streamlit pandas numpy torch scipy python-docx
+Requirements: pip install streamlit pandas numpy torch scipy python-docx plotly - education years + save results logic
 """
 
 import streamlit as st
@@ -20,6 +20,7 @@ from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_TABLE_ALIGNMENT
+import plotly.graph_objects as go
 
 # Set page config
 st.set_page_config(
@@ -85,6 +86,15 @@ st.markdown("""
         border-radius: 12px;
         margin: 0.5rem 0;
         box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    
+    /* Result card container for visual display */
+    .result-visual-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        text-align: center;
     }
     
     /* Method cards */
@@ -272,6 +282,14 @@ class ModelManager:
         self.models = {}
         self.metadata = {}
         self.coverage_data = {}
+        # Define method preference order and offset threshold
+        self.method_preference = ['LR', 'LQR', 'NNQR']
+        self.offset_threshold = 0.03  # Methods within 3% are considered equivalent
+        
+        # Define which tests should use the threshold logic
+        # You can modify this list to include/exclude specific tests
+        self.use_threshold_logic = ['dsf_raw', 'DSF_raw','dsb_raw', 'DSB_raw','soc_raw','SOC_raw','sdmt_raw','SDMT_raw']  # Only use threshold logic for DSB test
+        
         self.load_models()
     
     def load_models(self):
@@ -341,7 +359,12 @@ class ModelManager:
             predicted_score = model['intercept'] + np.dot(features, model['coefficients'])
             z_score = (actual_score - predicted_score) / model['std']
             percentile = norm.cdf(z_score) * 100
-            return np.round(percentile) #np.clip(percentile, 1, 99)
+            # Round to avoid floating point precision issues
+            percentile = np.round(percentile)
+            # Ensure percentile is never 0, set to 1 if it is
+            percentile = 1 if percentile == 0 else percentile
+            percentile = 99 if percentile == 100 else percentile
+            return percentile
         except Exception as e:
             st.error(f"LR prediction error: {str(e)}")
             return None
@@ -365,6 +388,8 @@ class ModelManager:
             else:
                 percentile = 99
             
+            # Round to avoid floating point precision issues
+            percentile = np.round(percentile)
             return np.clip(percentile, 1, 99)
         except Exception as e:
             st.error(f"LQR prediction error: {str(e)}")
@@ -390,7 +415,9 @@ class ModelManager:
                 percentile = self.quantiles[greater_idx[0]] * 100
             else:
                 percentile = 99
-                
+            
+            # Round to avoid floating point precision issues
+            percentile = np.round(percentile,1)
             return np.clip(percentile, 1, 99)
         except Exception as e:
             st.error(f"NNQR prediction error: {str(e)}")
@@ -412,7 +439,7 @@ class ModelManager:
             return 0.01
     
     def calculate_percentile_with_best_method(self, score, actual_score, features):
-        """Estimate percentile using all methods and select best based on coverage offset"""
+        """Calculate percentile using all methods and select best based on coverage offset with threshold"""
         results = {}
         offsets = {}
         
@@ -432,9 +459,35 @@ class ModelManager:
             results['NNQR'] = nnqr_percentile
             offsets['NNQR'] = self.get_coverage_offset(score, 'NNQR', nnqr_percentile)
         
-        # Find best method (minimum coverage offset)
+        # Find best method based on whether this test uses threshold logic
         if offsets:
-            best_method = min(offsets, key=offsets.get)
+            # Check if this test should use threshold logic
+            if score in self.use_threshold_logic:
+                # Use threshold approach with preference ordering
+                # Find minimum offset
+                min_offset = min(offsets.values())
+                
+                # Find methods within acceptable offset range
+                acceptable_methods = {
+                    method: offset 
+                    for method, offset in offsets.items() 
+                    if offset <= min_offset + self.offset_threshold
+                }
+                
+                # Select method based on preference order
+                best_method = None
+                for preferred_method in self.method_preference:
+                    if preferred_method in acceptable_methods:
+                        best_method = preferred_method
+                        break
+                
+                # Fallback to minimum offset if no preferred method is acceptable
+                if best_method is None:
+                    best_method = min(offsets, key=offsets.get)
+            else:
+                # Use original logic - simply select method with minimum offset
+                best_method = min(offsets, key=offsets.get)
+            
             best_percentile = results[best_method]
             best_offset = offsets[best_method]
         else:
@@ -448,6 +501,8 @@ class ModelManager:
         """Evaluate flagging for each method and agreement confidence"""
         flags = {}
         for method, percentile in results.items():
+            # Use < threshold consistently for all methods
+            # This means a score AT the threshold (e.g., 5th percentile when threshold is 5) is NOT flagged
             flags[method] = percentile < threshold
         
         flag_count = sum(flags.values())
@@ -455,7 +510,7 @@ class ModelManager:
         
         # If best_method and best_percentile provided, use new logic
         if best_method is not None and best_percentile is not None:
-            best_flagged = best_percentile < threshold
+            best_flagged = best_percentile < threshold  # Consistent with above
             
             # Determine majority opinion
             majority_says_flag = flag_count > total_methods / 2
@@ -523,6 +578,76 @@ def init_session_state():
     if 'test_counter' not in st.session_state:
         st.session_state.test_counter = 0
 
+# Function to create percentile ring visualization
+def create_percentile_ring(percentile, flag_status,h,w,f):
+    """Create a circular ring chart showing percentile visually"""
+    # Calculate how many segments to fill
+    segments = 20  # Total number of segments for finer granularity
+    filled_segments = int((percentile / 100) * segments)
+    remaining_segments = segments - filled_segments
+    
+    # Create values for the pie chart
+    values = [1] * segments
+    
+    # Create gradient colors based on percentile position
+    colors = []
+    for i in range(segments):
+        segment_percentile = (i + 1) * (100 / segments)
+        if segment_percentile <= percentile:
+            # Color the filled portion based on flag_status
+            if flag_status == True:
+                colors.append('#e74c3c')  # Red for flagged
+                
+            elif flag_status == False:
+                colors.append('#27ae60')  # Green for pass
+                
+            else:
+                colors.append("#d3d3d3")  # Gray for unknown status
+        else:
+            # Empty segments in light gray
+            colors.append("#d3d3d3")  # Light gray for unfilled portion
+    
+    # Create the pie chart
+    fig = go.Figure(go.Pie(
+        values=values,
+        marker=dict(colors=colors, line=dict(color='white', width=2)),
+        hole=0.55,
+        direction='clockwise',
+        sort=False,
+        textinfo='none',
+        hoverinfo='none',
+        showlegend=False
+    ))
+    
+    # Update layout
+    fig.update_layout(
+        showlegend=False,
+        margin=dict(t=0, b=0, l=0, r=0),
+        width=w,
+        height=h,
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)'
+    )
+    
+    # Determine text color based on percentile
+    if flag_status == True:
+        text_color = '#e74c3c'
+    elif flag_status == False:
+        text_color = '#27ae60'
+    else:
+        text_color = "#070707"
+    
+    # Add percentile text in the center
+    fig.add_annotation(
+        text=f"<b>{percentile:.0f}</b><br><span style='font-size:{f}px'>%</span>",
+        x=0.5, y=0.5,
+        xref="paper", yref="paper",
+        showarrow=False,
+        font=dict(size=f, color=text_color, family="Arial")
+    )
+    
+    return fig
+
 # Function to generate Word report
 def generate_word_report(all_results, demographics):
     """Generate a comprehensive Word report for all test results"""
@@ -537,7 +662,7 @@ def generate_word_report(all_results, demographics):
         section.right_margin = Inches(1)
     
     # Title
-    title = doc.add_heading('Neuropsychological Assessment Report', 0)
+    title = doc.add_heading('Neuropsychological Assessment Report based on Retrospective Data (2010 -2024) from Irish Jockeys', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Report metadata
@@ -568,12 +693,12 @@ def generate_word_report(all_results, demographics):
     doc.add_heading('Test Results Summary', level=1)
     
     # Create summary table
-    summary_table = doc.add_table(rows=len(all_results)+1, cols=6)
+    summary_table = doc.add_table(rows=len(all_results)+1, cols=5)
     summary_table.style = 'Light Grid Accent 1'
     summary_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     # Headers
-    headers = ['Test', 'Raw Score', 'Percentile', 'Clinical Level', 'Flag Status', 'Method Agreement']
+    headers = ['Test', 'Raw Score', 'Percentile', 'Flag Status', 'Method Agreement']
     for i, header in enumerate(headers):
         cell = summary_table.cell(0, i)
         cell.text = header
@@ -586,10 +711,10 @@ def generate_word_report(all_results, demographics):
         summary_table.cell(i, 0).text = result['test_name'].replace('_raw', '').upper()
         summary_table.cell(i, 1).text = f"{result['actual_score']:.2f}"
         summary_table.cell(i, 2).text = f"{result['best_percentile']:.0f}th"
-        summary_table.cell(i, 3).text = result['interpretation']
+        # summary_table.cell(i, 3).text = result['interpretation']
         
         # Flag status with color
-        flag_cell = summary_table.cell(i, 4)
+        flag_cell = summary_table.cell(i, 3)
         flag_cell.text = result['flag_status']
         if result['flag_status'] == 'FLAGGED':
             run = flag_cell.paragraphs[0].runs[0]
@@ -598,7 +723,7 @@ def generate_word_report(all_results, demographics):
             run = flag_cell.paragraphs[0].runs[0]
             run.font.color.rgb = RGBColor(39, 174, 96)  # Green
         
-        summary_table.cell(i, 5).text = result['agreement_ratio']
+        summary_table.cell(i, 4).text = result['agreement_ratio']
     
     doc.add_page_break()
     
@@ -616,7 +741,7 @@ def generate_word_report(all_results, demographics):
         details = [
             ('Raw Score', f"{result['actual_score']:.2f}"),
             ('Best Percentile (Method)', f"{result['best_percentile']:.0f}th ({result['best_method']})"),
-            ('Clinical Interpretation', result['interpretation']),
+            # ('Clinical Interpretation', result['interpretation']),
             ('Flag Status (Threshold)', f"(< {result['threshold']}th percentile)"),
             ('Method Agreement', f"{result['agreement_level']} ({result['agreement_ratio']})")
         ]
@@ -668,7 +793,7 @@ def generate_word_report(all_results, demographics):
     if flagged_tests:
         summary_text += "The following tests showed clinically significant findings:\n"
         for test in flagged_tests:
-            summary_text += f"• {test['test_name'].replace('_raw', '').upper()}: {test['best_percentile']:.0f}th percentile ({test['interpretation']})\n"
+            summary_text += f"• {test['test_name'].replace('_raw', '').upper()}: {test['best_percentile']:.0f}th percentile \n"
     else:
         summary_text += "All test scores fell within or above the expected range for the subject's demographic profile."
     
@@ -704,19 +829,19 @@ def main():
     with col1:
         st.markdown(f'<div style="padding-top: 0.5rem;">{logo_svg}</div>', unsafe_allow_html=True)
     with col2:
-        st.markdown('<div class="main-header">Neuropsychological Percentile Estimation </div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">Comparative Neuropsychological Percentile Estimation Based on Irish Jockeys Data</div>', unsafe_allow_html=True)
     
     # Research description
     st.markdown("""
     <div style="background-color: #e8f4f8; border-left: 4px solid #1f77b4; padding: 1rem; 
                 border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.95rem;">
         <strong>📚 About this Research Tool:</strong><br>
-       This dashboard resulted from research funding by HRB Ireland’s Secondary Data Analysis Grant, presents regression-based normative models 
+        This dashboard resulted from research funding by HRB Ireland’s Secondary Data Analysis Grant, presents regression-based normative models 
         for neuropsychological tests in Irish jockeys (2010–2024) to support concussion assessment. Percentile estimates 
         are generated using age, sex, and education via three methods: Linear Regression (LR), 
         Linear Quantile Regression (LQR), and Neural Network Quantile Regression (NNQR). The best estimate 
         is selected based on empirical coverage offset, and agreement confidence reflects consistency across the three methods.
-        </div>
+    </div>
     """, unsafe_allow_html=True)
     
     # Load models
@@ -736,7 +861,26 @@ def main():
         with col2:
             sex = st.selectbox("Sex", ["Male", "Female"])
         
-        education = st.number_input("Education (years)", min_value=8, max_value=22, value=12, step=1)
+        # Calculate maximum realistic education years based on age
+        # Assuming education starts at age 6, max education = age - 6
+        max_education = min(22, age - 6)  # Cap at 22 years maximum
+        
+        # Show warning if current education value would be invalid
+        if 'prev_age' not in st.session_state:
+            st.session_state.prev_age = age
+        
+        education = st.number_input(
+            "Education (years)", 
+            min_value=8, 
+            max_value=max_education, 
+            value=min(12, max_education),  # Default to 12 or max allowed
+            step=1,
+            help=f"Maximum education years for age {age} is {max_education} (assuming education starts at age 6)"
+        )
+        
+        # Show validation message if needed
+        if education > max_education:
+            st.error(f"⚠️ Education years cannot exceed {max_education} for age {age}")
         
         sex_numeric = 1 if sex == "Male" else 0
         features = np.array([age, sex_numeric, education])
@@ -851,27 +995,21 @@ def main():
     col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
     
     with col1:
+    # Define mapping for test names
+        test_name_mapping = {
+            'DSF_raw': 'Digit Span Forward (DSF)',
+            'DSB_raw': 'Digit Span Backward (DSB)',
+            'SOC_raw': 'Speed of Comprehension (SOC)',
+            'SDMT_raw': 'Symbol Digit Modalities (SDMT)'
+        }
+    
         selected_score = st.selectbox(
             "Select Test",
             model_manager.available_scores,
-            format_func=lambda x: x.replace('_raw', '').upper()
+            format_func=lambda x: test_name_mapping.get(x, x.replace('_raw', '').upper())
         )
-    
+
     with col2:
-        # Get the range for the selected test
-        min_score = score_ranges.get(selected_score, {}).get('min', 0)
-        max_score = score_ranges.get(selected_score, {}).get('max', 100)
-        
-        actual_score = st.number_input(
-            "Actual Score",
-            min_value=float(min_score),
-            max_value=float(max_score),
-            value=float(min_score),
-            step=0.01,
-            help=f"Enter raw test score (Range: {min_score} - {max_score})"
-        )
-    
-    with col3:
         threshold = st.number_input(
             "Flag Threshold (%ile)",
             min_value=1,
@@ -881,6 +1019,22 @@ def main():
             help="Flag scores below this percentile"
         )
     
+    
+    with col3:
+        # Get the range for the selected test
+        min_score = score_ranges.get(selected_score, {}).get('min', 0)
+        max_score = score_ranges.get(selected_score, {}).get('max', 100)
+        
+        actual_score = st.number_input(
+            "Actual Score",
+            min_value=float(min_score),
+            max_value=float(max_score),
+            value=float(min_score),
+            step=1.0,
+            help=f"Enter raw test score (Range: {min_score} - {max_score})"
+        )
+    
+
     with col4:
         calculate_btn = st.button("🚀 Estimate", type="primary", use_container_width=True)
     
@@ -941,72 +1095,196 @@ def main():
         col1, col2, col3 = st.columns([2, 3, 2])
         
         with col1:
-            # Best result card
-            card_class = "result-card-flagged" if best_flagged else "result-card-safe"
-            flag_text = "⚠️ FLAGGED" if best_flagged else "✅ PASS"
-            
-            st.markdown(f"""
-            <div class="{card_class}">
-                <div class="metric-label">Best Estimate ({best_method})</div>
-                <div class="metric-value">{best_percentile:.0f}th</div>
-                <div style="margin-top: 0.5rem; font-size: 1.1rem;">{flag_text}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            with st.container(border=True):
+                # Best result header
+                st.markdown("#### 🏆 Best Estimate")
+                
+                # Create percentile ring visualization
+                ring_fig = create_percentile_ring(best_percentile, best_flagged, h=180, w=180, f=25)
+                st.plotly_chart(ring_fig, use_container_width=True, config={'displayModeBar': False})
+                
+                # Method and status below the ring
+                flag_text = "⚠️ FLAGGED" if best_flagged else "✅ PASS"
+                flag_color = "#e74c3c" if best_flagged else "#27ae60"
+                
+                st.markdown(f"""
+                <div style="text-align: center; margin-top: -20px;">
+                    <div style="font-size: 1.2rem; font-weight: bold; color: #333; margin-bottom: 10px;">{best_method}</div>
+                    <div style="font-size: 1.1rem; color: {flag_color}; font-weight: bold;">{flag_text}</div>
+                </div>
+        """, unsafe_allow_html=True)
         
         with col2:
-            # Method comparison in compact grid
-            st.markdown("**Method Comparison**")
-            
-            method_cols = st.columns(3)
-            for i, (method, percentile) in enumerate(results.items()):
-                with method_cols[i]:
-                    method_flagged = flags[method]
-                    card_class = "method-card-flagged" if method_flagged else "method-card-safe"
-                    
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        <strong>{method}</strong><br>
-                        <span style="font-size: 1.5rem;">{np.round(percentile):.1f}th</span><br>
-                        <small>{'Flagged' if method_flagged else 'Pass'}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
+            with st.container(border=True):
+                # Method comparison header
+                st.markdown("#### 📊 Method Comparison")
+                
+                # Create 3 columns for methods
+                method_cols = st.columns(3)
+                
+                for i, (method, percentile) in enumerate(results.items()):
+                    with method_cols[i]:
+                        method_flagged = flags[method]
+
+                        # Create the ring chart
+                        ring_figure = create_percentile_ring(percentile, method_flagged, h=80, w=80, f=12)
+                        
+                        # Add unique key to avoid duplicate ID error
+                        st.plotly_chart(
+                            ring_figure, 
+                            config={'displayModeBar': False},
+                            key=f"ring_chart_{method}_{i}"  # Unique key for each chart
+                        )
+                        
+                        # Method name and status
+                        flag_text = "⚠️ FLAGGED" if method_flagged else "✅ PASS"
+                        flag_color = "#e74c3c" if method_flagged else "#27ae60"
+                        
+                        st.markdown(f"""
+                        <div style="text-align: center; margin-top: -20px;">
+                            <div style="font-size: 1.2rem; text-align: center; font-weight: bold; color: #333; margin-bottom: 10px;">{method}</div>
+                            <div style="font-size: 1.1rem; color: {flag_color}; font-weight: bold;">{flag_text}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
         
         with col3:
-            # Agreement and interpretation
-            if best_percentile >= 25:
-                interpretation = "Within normal limits"
-                interp_color = "#27ae60"
-            elif best_percentile >= 16:
-                interpretation = "Low average"
-                interp_color = "#f39c12"
-            elif best_percentile >= 5:
-                interpretation = "Below average"
-                interp_color = "#e67e22"
-            else:
-                interpretation = "Significantly below"
-                interp_color = "#e74c3c"
+            with st.container(border=True):
+                st.markdown("#### 📊 Agreement ")
+                
+                # Calculate summary metrics  
+                total_methods = len(results)
+                flagged_count = sum(flags.values())
+                passed_count = total_methods - flagged_count
+                
+                summary_cols = st.columns(3)
+                
+                with summary_cols[0]:
+                    st.metric("Methods", total_methods)
+                
+                with summary_cols[1]:
+                    st.metric("Flagged", flagged_count,
+                            delta=f"-{flagged_count}" if flagged_count > 0 else "0",
+                            delta_color="inverse")
+                
+                with summary_cols[2]:
+                    st.metric("Passed", passed_count,
+                            delta=f"+{passed_count}" if passed_count > 0 else "0",
+                            delta_color="normal")
+                st.markdown(f"""
+                <div class="text-align" style="background-color: {agreement_color}20; border-left: 0px solid {agreement_color};">
+                    <strong>Agreement Confidence: {agreement_confidence}</strong><br>
+                    {agreement_level} ({agreement_ratio})<br>
+                </div>
+                """, unsafe_allow_html=True)
+                    # # Agreement and interpretation
+                    # if best_percentile >= 25:
+                    #     interpretation = "Within normal limits"
+                    #     interp_color = "#27ae60"
+                    # elif best_percentile >= 16:
+                    #     interpretation = "Low average"
+                    #     interp_color = "#f39c12"
+                    # elif best_percentile >= 5:
+                    #     interpretation = "Below average"
+                    #     interp_color = "#e67e22"
+                    # else:
+                    #     interpretation = "Significantly below"
+                    #     interp_color = "#e74c3c"
             
-            st.markdown(f"""
-            <div class="info-box" style="background-color: {agreement_color}20; border-left: 3px solid {agreement_color};">
-                <strong>Agreement Confidence: {agreement_confidence}</strong><br>
-                {agreement_level} ({agreement_ratio})<br>
-                <hr style="margin: 0.5rem 0; opacity: 0.3;">
-                <strong>Clinical Level:</strong><br>
-                <span style="color: {interp_color};">{interpretation}</span>
-            </div>
-            """, unsafe_allow_html=True)
+            # st.markdown(f"""
+            # <div class="info-box" style="background-color: {agreement_color}20; border-left: 3px solid {agreement_color};">
+            #     <strong>Agreement Confidence: {agreement_confidence}</strong><br>
+            #     {agreement_level} ({agreement_ratio})<br>
+            # </div>
+            # """, unsafe_allow_html=True)
+        
+        # Score Improvement Guidance
+        # st.markdown('<div class="section-header">💡 Score Improvement Guidance</div>', unsafe_allow_html=True)
+        
+        # Calculate guidance based on current status
+        guidance_message = ""
+        guidance_color = ""
+        
+        # Get score range for current test
+        min_score = score_ranges.get(current_score, {}).get('min', 0)
+        max_score = score_ranges.get(current_score, {}).get('max', 100)
+        
+        if best_flagged:
+            # User is below threshold - find score needed to cross threshold
+            test_score = int(current_actual) + 1
+            found_threshold_score = None
+            
+            while test_score <= max_score:
+                # Calculate percentile for this test score
+                test_results, _, test_best_method, test_best_percentile, _ = model_manager.calculate_percentile_with_best_method(
+                    current_score, float(test_score), features
+                )
+                
+                if test_best_percentile and test_best_percentile >= current_threshold:
+                    found_threshold_score = test_score
+                    found_percentile = test_best_percentile
+                    break
+                
+                test_score += 1
+            
+            if found_threshold_score:
+                guidance_message = f"""
+                <div class="info-box-alert">
+                    <strong>🎯 To Cross the Threshold:</strong><br>
+                    You need to score at least <strong>{found_threshold_score}</strong> to exceed the {current_threshold}th percentile threshold as per the corresponding best method {test_best_method}.<br>
+                    <small>A score of {found_threshold_score} would place you at approximately the {found_percentile:.0f}th percentile </small>
+                </div>
+                """
+            else:
+                guidance_message = f"""
+                <div class="info-box-alert">
+                    <strong>ℹ️ Score Guidance:</strong><br>
+                    Even at the maximum score ({max_score}), the percentile may not exceed the {current_threshold}th threshold for your demographic profile based on current Best Method {best_method}.
+                </div>
+                """
+        else:
+            # User is above threshold - show next score improvement
+            next_score = int(current_actual) + 1
+            
+            if next_score <= max_score:
+                # Calculate percentile for next score
+                next_results, _, next_best_method, next_best_percentile, _ = model_manager.calculate_percentile_with_best_method(
+                    current_score, float(next_score), features
+                )
+                
+                if next_best_percentile:
+                    improvement = next_best_percentile - best_percentile
+                    guidance_message = f"""
+                    <div class="info-box-success">
+                        <strong>💡 Score Improvement Potential:</strong><br>
+                        If you score <strong>{next_score}</strong> (one point higher), you would be at approximately the <strong>{next_best_percentile:.0f}th percentile as per the corresponding best method {next_best_method}</strong>.<br>
+                        <small>This represents a {improvement:.0f} percentile point improvement from your current position.</small>
+                    </div>
+                    """
+            else:
+                guidance_message = f"""
+                <div class="info-box-success">
+                    <strong>⭐ Maximum Score Achieved:</strong><br>
+                    You have achieved the maximum possible raw score ({max_score}) for this test.
+                </div>
+                """
+        
+        # Display guidance message
+        if guidance_message:
+            st.markdown(guidance_message, unsafe_allow_html=True)
         
         # Action buttons
-        st.markdown("---")
+        # st.markdown("---")
         col1, col2, col3 = st.columns([1, 1, 3])
         
         with col1:
             # Save to session
             if st.button("💾 Save Test Result", type="primary"):
-                # Check if this test was already saved
+                # Create a unique identifier for this specific test configuration
+                test_config_id = f"{current_score}_{current_actual}_{current_threshold}_{best_method}_{best_percentile}"
+                
+                # Check if this exact configuration was already saved
                 already_saved = any(
-                    test['test_name'] == current_score and 
-                    test['actual_score'] == current_actual 
+                    f"{test['test_name']}_{test['actual_score']}_{test['threshold']}_{test['best_method']}_{test['best_percentile']}" == test_config_id
                     for test in st.session_state.all_test_results
                 )
                 
@@ -1019,7 +1297,7 @@ def main():
                         'best_method': best_method,
                         'best_percentile': best_percentile,
                         'flag_status': 'FLAGGED' if best_flagged else 'PASS',
-                        'interpretation': interpretation,
+                        # 'interpretation': interpretation,
                         'agreement_level': agreement_level,
                         'agreement_ratio': agreement_ratio,
                         'agreement_confidence': agreement_confidence,
@@ -1038,8 +1316,10 @@ def main():
                     st.session_state.all_test_results.append(test_result)
                     st.session_state.test_counter += 1
                     st.success(f"✅ Test result saved! ({len(st.session_state.all_test_results)} tests in session)")
+                    # Force rerun to update sidebar immediately
+                    st.rerun()
                 else:
-                    st.warning("⚠️ This test result has already been saved!")
+                    st.warning("⚠️ This exact test configuration has already been saved! Change the threshold or other parameters to save a different configuration.")
         
         with col2:
             if st.button("🔄 New Test"):
@@ -1069,7 +1349,7 @@ def main():
             st.markdown("""
             <div class="info-box">
             <strong>Step 2. Test Settings</strong><br>
-            Select test and set threshold above
+            Select test and set 'Flag' threshold above
             </div>
             """, unsafe_allow_html=True)
         
@@ -1085,7 +1365,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; 
-                padding: 1rem; margin-top: 1rem; margin-bottom: 2rem; color: #856404;">
+                padding: 1rem; margin-top: -0.2rem; margin-bottom: 2rem; color: #856404;">
         <strong>⚠️ Important Disclaimer:</strong><br>
         This application is intended primarily as a research tool for exploring and comparing normative modeling approaches. 
         Users are advised to interpret results with caution and avoid relying solely on its outputs for critical clinical decisions. 
