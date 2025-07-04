@@ -282,14 +282,6 @@ class ModelManager:
         self.models = {}
         self.metadata = {}
         self.coverage_data = {}
-        # Define method preference order and offset threshold
-        self.method_preference = ['LR', 'LQR', 'NNQR']
-        self.offset_threshold = 0.03  # Methods within 3% are considered equivalent
-        
-        # Define which tests should use the threshold logic
-        # You can modify this list to include/exclude specific tests
-        self.use_threshold_logic = ['dsf_raw', 'DSF_raw','dsb_raw', 'DSB_raw','soc_raw','SOC_raw','sdmt_raw','SDMT_raw']  # Only use threshold logic for DSB test
-        
         self.load_models()
     
     def load_models(self):
@@ -360,11 +352,8 @@ class ModelManager:
             z_score = (actual_score - predicted_score) / model['std']
             percentile = norm.cdf(z_score) * 100
             # Round to avoid floating point precision issues
-            percentile = np.round(percentile)
-            # Ensure percentile is never 0, set to 1 if it is
-            percentile = 1 if percentile == 0 else percentile
-            percentile = 99 if percentile == 100 else percentile
-            return percentile
+            percentile = np.round(percentile, 2)
+            return np.clip(percentile, 1, 99)
         except Exception as e:
             st.error(f"LR prediction error: {str(e)}")
             return None
@@ -389,7 +378,7 @@ class ModelManager:
                 percentile = 99
             
             # Round to avoid floating point precision issues
-            percentile = np.round(percentile)
+            percentile = np.round(percentile, 2)
             return np.clip(percentile, 1, 99)
         except Exception as e:
             st.error(f"LQR prediction error: {str(e)}")
@@ -417,7 +406,7 @@ class ModelManager:
                 percentile = 99
             
             # Round to avoid floating point precision issues
-            percentile = np.round(percentile,1)
+            percentile = np.round(percentile, 2)
             return np.clip(percentile, 1, 99)
         except Exception as e:
             st.error(f"NNQR prediction error: {str(e)}")
@@ -438,8 +427,16 @@ class ModelManager:
         except:
             return 0.01
     
-    def calculate_percentile_with_best_method(self, score, actual_score, features):
-        """Calculate percentile using all methods and select best based on coverage offset with threshold"""
+    def calculate_percentile_with_best_method(self, score, actual_score, features, min_percentile_constraint=None, use_max_percentile=False):
+        """Calculate percentile using all methods and select best based on coverage offset or max percentile
+        
+        Args:
+            score: Test type
+            actual_score: The actual test score
+            features: Demographic features
+            min_percentile_constraint: If provided, only select methods that give percentile >= this value
+            use_max_percentile: If True, select method with highest percentile instead of best coverage
+        """
         results = {}
         offsets = {}
         
@@ -459,34 +456,37 @@ class ModelManager:
             results['NNQR'] = nnqr_percentile
             offsets['NNQR'] = self.get_coverage_offset(score, 'NNQR', nnqr_percentile)
         
-        # Find best method based on whether this test uses threshold logic
-        if offsets:
-            # Check if this test should use threshold logic
-            if score in self.use_threshold_logic:
-                # Use threshold approach with preference ordering
-                # Find minimum offset
-                min_offset = min(offsets.values())
-                
-                # Find methods within acceptable offset range
-                acceptable_methods = {
-                    method: offset 
-                    for method, offset in offsets.items() 
-                    if offset <= min_offset + self.offset_threshold
-                }
-                
-                # Select method based on preference order
-                best_method = None
-                for preferred_method in self.method_preference:
-                    if preferred_method in acceptable_methods:
-                        best_method = preferred_method
-                        break
-                
-                # Fallback to minimum offset if no preferred method is acceptable
-                if best_method is None:
-                    best_method = min(offsets, key=offsets.get)
+        # Apply minimum percentile constraint if provided
+        if min_percentile_constraint is not None:
+            # Filter out methods that would create non-monotonic results
+            valid_results = {method: pct for method, pct in results.items() 
+                           if pct >= min_percentile_constraint}
+            valid_offsets = {method: offset for method, offset in offsets.items() 
+                           if method in valid_results}
+            
+            # If no methods satisfy the constraint, fall back to highest percentile
+            if not valid_results:
+                # Select method with highest percentile to maintain monotonicity
+                best_method = max(results, key=results.get)
+                best_percentile = results[best_method]
+                best_offset = offsets[best_method]
+                return results, offsets, best_method, best_percentile, best_offset
+            
+            # Use valid results/offsets for selection
+            results_for_selection = valid_results
+            offsets_for_selection = valid_offsets
+        else:
+            results_for_selection = results
+            offsets_for_selection = offsets
+        
+        # Find best method based on selection criteria
+        if results_for_selection:
+            if use_max_percentile:
+                # For maximum score, select method with highest percentile
+                best_method = max(results_for_selection, key=results_for_selection.get)
             else:
-                # Use original logic - simply select method with minimum offset
-                best_method = min(offsets, key=offsets.get)
+                # Normal case: select method with minimum offset
+                best_method = min(offsets_for_selection, key=offsets_for_selection.get)
             
             best_percentile = results[best_method]
             best_offset = offsets[best_method]
@@ -662,7 +662,7 @@ def generate_word_report(all_results, demographics):
         section.right_margin = Inches(1)
     
     # Title
-    title = doc.add_heading('Neuropsychological Assessment Report based on Retrospective Data (2010 -2024) from Irish Jockeys', 0)
+    title = doc.add_heading('Neuropsychological Assessment Report', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Report metadata
@@ -698,7 +698,7 @@ def generate_word_report(all_results, demographics):
     summary_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     # Headers
-    headers = ['Test', 'Raw Score', 'Percentile', 'Flag Status', 'Method Agreement']
+    headers = ['Test', 'Raw Score', 'Percentile',  'Flag Status', 'Method Agreement']
     for i, header in enumerate(headers):
         cell = summary_table.cell(0, i)
         cell.text = header
@@ -793,7 +793,7 @@ def generate_word_report(all_results, demographics):
     if flagged_tests:
         summary_text += "The following tests showed clinically significant findings:\n"
         for test in flagged_tests:
-            summary_text += f"• {test['test_name'].replace('_raw', '').upper()}: {test['best_percentile']:.0f}th percentile \n"
+            summary_text += f"• {test['test_name'].replace('_raw', '').upper()}: {test['best_percentile']:.0f}th percentile\n"
     else:
         summary_text += "All test scores fell within or above the expected range for the subject's demographic profile."
     
@@ -1017,8 +1017,7 @@ def main():
             value=5,
             step=1,
             help="Flag scores below this percentile"
-        )
-    
+        )    
     
     with col3:
         # Get the range for the selected test
@@ -1035,20 +1034,50 @@ def main():
         )
     
 
+    
     with col4:
         calculate_btn = st.button("🚀 Estimate", type="primary", use_container_width=True)
     
     # Results section
     if calculate_btn and actual_score is not None:
         with st.spinner("Calculating..."):
+            # Check if we have a previous calculation for the same test and demographics
+            min_percentile_constraint = None
+            
+            if 'calculation_history' not in st.session_state:
+                st.session_state.calculation_history = []
+            
+            # Look for previous calculations with same test and demographics but lower scores
+            for prev_calc in st.session_state.calculation_history:
+                if (prev_calc['test'] == selected_score and 
+                    prev_calc['features'] == features.tolist() and
+                    prev_calc['score'] < actual_score):
+                    # If there's a previous calculation with lower score, use its percentile as constraint
+                    if min_percentile_constraint is None or prev_calc['percentile'] > min_percentile_constraint:
+                        min_percentile_constraint = prev_calc['percentile']
+            
+            # Calculate with constraint if applicable
             results, offsets, best_method, best_percentile, best_offset = model_manager.calculate_percentile_with_best_method(
-                selected_score, actual_score, features
+                selected_score, actual_score, features, min_percentile_constraint=min_percentile_constraint
             )
             
             if results:
                 flags, agreement_level, agreement_color, agreement_ratio, agreement_confidence = model_manager.evaluate_flags(
                     results, threshold, best_method=best_method, best_percentile=best_percentile
                 )
+                
+                # Add current calculation to history
+                st.session_state.calculation_history.append({
+                    'test': selected_score,
+                    'features': features.tolist(),
+                    'score': actual_score,
+                    'percentile': best_percentile,
+                    'method': best_method
+                })
+                
+                # Keep only last 50 calculations to avoid memory issues
+                if len(st.session_state.calculation_history) > 50:
+                    st.session_state.calculation_history = st.session_state.calculation_history[-50:]
                 
                 # Store current calculation in session state
                 st.session_state.current_results = {
@@ -1176,26 +1205,6 @@ def main():
                     {agreement_level} ({agreement_ratio})<br>
                 </div>
                 """, unsafe_allow_html=True)
-                    # # Agreement and interpretation
-                    # if best_percentile >= 25:
-                    #     interpretation = "Within normal limits"
-                    #     interp_color = "#27ae60"
-                    # elif best_percentile >= 16:
-                    #     interpretation = "Low average"
-                    #     interp_color = "#f39c12"
-                    # elif best_percentile >= 5:
-                    #     interpretation = "Below average"
-                    #     interp_color = "#e67e22"
-                    # else:
-                    #     interpretation = "Significantly below"
-                    #     interp_color = "#e74c3c"
-            
-            # st.markdown(f"""
-            # <div class="info-box" style="background-color: {agreement_color}20; border-left: 3px solid {agreement_color};">
-            #     <strong>Agreement Confidence: {agreement_confidence}</strong><br>
-            #     {agreement_level} ({agreement_ratio})<br>
-            # </div>
-            # """, unsafe_allow_html=True)
         
         # Score Improvement Guidance
         # st.markdown('<div class="section-header">💡 Score Improvement Guidance</div>', unsafe_allow_html=True)
@@ -1212,33 +1221,64 @@ def main():
             # User is below threshold - find score needed to cross threshold
             test_score = int(current_actual) + 1
             found_threshold_score = None
+            last_valid_percentile = best_percentile  # Track last valid percentile for monotonicity
+            max_achievable_percentile = best_percentile  # Track the maximum achievable percentile
             
+            # First, find the score that crosses the threshold
             while test_score <= max_score:
-                # Calculate percentile for this test score
+                # Calculate percentile for this test score with monotonicity constraint
                 test_results, _, test_best_method, test_best_percentile, _ = model_manager.calculate_percentile_with_best_method(
-                    current_score, float(test_score), features
+                    current_score, float(test_score), features, min_percentile_constraint=last_valid_percentile
                 )
                 
-                if test_best_percentile and test_best_percentile >= current_threshold:
-                    found_threshold_score = test_score
-                    found_percentile = test_best_percentile
-                    break
+                if test_best_percentile:
+                    max_achievable_percentile = max(max_achievable_percentile, test_best_percentile)
+                    
+                    if test_best_percentile >= current_threshold and found_threshold_score is None:
+                        found_threshold_score = test_score
+                        found_percentile = test_best_percentile
+                
+                # Update last valid percentile if we found a higher one
+                if test_best_percentile and test_best_percentile > last_valid_percentile:
+                    last_valid_percentile = test_best_percentile
                 
                 test_score += 1
+            
+            # Also check what percentile can be achieved at maximum score
+            # For maximum score, we want the highest possible percentile, not the best coverage
+            max_score_results, _, max_score_method, max_score_percentile, _ = model_manager.calculate_percentile_with_best_method(
+                current_score, float(max_score), features, 
+                min_percentile_constraint=last_valid_percentile,
+                use_max_percentile=True  # Select method with highest percentile for max score
+            )
+            
+            if max_score_percentile:
+                max_achievable_percentile = max(max_achievable_percentile, max_score_percentile)
             
             if found_threshold_score:
                 guidance_message = f"""
                 <div class="info-box-alert">
                     <strong>🎯 To Cross the Threshold:</strong><br>
-                    You need to score at least <strong>{found_threshold_score}</strong> to exceed the {current_threshold}th percentile threshold as per the corresponding best method {test_best_method}.<br>
-                    <small>A score of {found_threshold_score} would place you at approximately the {found_percentile:.0f}th percentile </small>
+                    You need to score at least <strong>{found_threshold_score}</strong> to exceed the {current_threshold}th percentile threshold.<br>
+                    <small>A score of {found_threshold_score} would place you at approximately the {found_percentile:.0f}th percentile.</small>
+                </div>
+                """
+            elif max_achievable_percentile >= current_threshold:
+                # Threshold can be reached, but we need to find the exact score
+                # This handles cases where sequential checking missed it due to monotonicity constraints
+                guidance_message = f"""
+                <div class="info-box-alert">
+                    <strong>🎯 Score Guidance:</strong><br>
+                    The {current_threshold}th percentile threshold can be achieved with a higher score.<br>
+                    <small>Maximum achievable percentile: {max_achievable_percentile:.0f}th at score {max_score} (using {max_score_method})</small>
                 </div>
                 """
             else:
                 guidance_message = f"""
                 <div class="info-box-alert">
                     <strong>ℹ️ Score Guidance:</strong><br>
-                    Even at the maximum score ({max_score}), the percentile may not exceed the {current_threshold}th threshold for your demographic profile based on current Best Method {best_method}.
+                    Based on your demographic profile, the maximum achievable percentile is <strong>{max_achievable_percentile:.0f}th</strong> 
+                    (at score {max_score}, using {max_score_method}), which is below the {current_threshold}th percentile threshold.
                 </div>
                 """
         else:
@@ -1246,17 +1286,17 @@ def main():
             next_score = int(current_actual) + 1
             
             if next_score <= max_score:
-                # Calculate percentile for next score
+                # Calculate percentile for next score with monotonicity constraint
                 next_results, _, next_best_method, next_best_percentile, _ = model_manager.calculate_percentile_with_best_method(
-                    current_score, float(next_score), features
+                    current_score, float(next_score), features, min_percentile_constraint=best_percentile
                 )
                 
                 if next_best_percentile:
                     improvement = next_best_percentile - best_percentile
                     guidance_message = f"""
                     <div class="info-box-success">
-                        <strong>💡 Score Improvement Potential:</strong><br>
-                        If you score <strong>{next_score}</strong> (one point higher), you would be at approximately the <strong>{next_best_percentile:.0f}th percentile as per the corresponding best method {next_best_method}</strong>.<br>
+                        <strong>🚀 Score Improvement Potential:</strong><br>
+                        If you score <strong>{next_score}</strong> (one point higher), you would be at approximately the <strong>{next_best_percentile:.0f}th percentile</strong>.<br>
                         <small>This represents a {improvement:.0f} percentile point improvement from your current position.</small>
                     </div>
                     """
@@ -1340,7 +1380,7 @@ def main():
         with col1:
             st.markdown("""
             <div class="info-box">
-            <strong>Step 1. Demographics</strong><br>
+            <strong>1. Demographics</strong><br>
             Enter subject details in the sidebar
             </div>
             """, unsafe_allow_html=True)
@@ -1348,16 +1388,16 @@ def main():
         with col2:
             st.markdown("""
             <div class="info-box">
-            <strong>Step 2. Test Settings</strong><br>
-            Select test and set 'Flag' threshold above
+            <strong>2. Test Settings</strong><br>
+            Select test and set threshold above
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             st.markdown("""
             <div class="info-box">
-            <strong>Step 3. Estimate</strong><br>
-            Enter score and click Estimate
+            <strong>3. Calculate</strong><br>
+            Enter score and click Calculate
             </div>
             """, unsafe_allow_html=True)
     
