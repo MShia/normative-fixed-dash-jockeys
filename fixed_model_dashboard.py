@@ -1380,7 +1380,7 @@ def main():
         with col1:
             st.markdown("""
             <div class="info-box">
-            <strong>1. Demographics</strong><br>
+            <strong>Step 1. Demographics</strong><br>
             Enter subject details in the sidebar
             </div>
             """, unsafe_allow_html=True)
@@ -1388,16 +1388,16 @@ def main():
         with col2:
             st.markdown("""
             <div class="info-box">
-            <strong>2. Test Settings</strong><br>
-            Select test and set threshold above
+            <strong>Step 2. Test Settings</strong><br>
+            Select test and set 'Flag' threshold above
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             st.markdown("""
             <div class="info-box">
-            <strong>3. Calculate</strong><br>
-            Enter score and click Calculate
+            <strong>Step 3. Estimate</strong><br>
+            Enter 'Actual' score and click Estimate
             </div>
             """, unsafe_allow_html=True)
     
