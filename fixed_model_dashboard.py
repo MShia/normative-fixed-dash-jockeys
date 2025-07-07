@@ -1465,7 +1465,7 @@ def main():
             st.markdown("""
             <div class="info-box">
             <strong>Step 3. Estimate </strong><br>
-            Enter score and click Calculate
+            Enter score and click Estimate
             </div>
             """, unsafe_allow_html=True)
     
