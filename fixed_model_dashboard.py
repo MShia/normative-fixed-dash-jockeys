@@ -843,7 +843,7 @@ def generate_word_report(all_results, demographics):
     
     # Clinical Summary
     doc.add_page_break()
-    doc.add_heading('Clinical Summary', level=1)
+    doc.add_heading('Session Summary', level=1)
     
     # Count flagged tests
     flagged_tests = [r for r in all_results if r['flag_status'] == 'FLAGGED']
