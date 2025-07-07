@@ -352,8 +352,11 @@ class ModelManager:
             z_score = (actual_score - predicted_score) / model['std']
             percentile = norm.cdf(z_score) * 100
             # Round to avoid floating point precision issues
-            percentile = np.round(percentile, 2)
-            return np.clip(percentile, 1, 99)
+            percentile = np.round(percentile)
+            # Ensure percentile is never 0, set to 1 if it is
+            percentile = 1 if percentile == 0 else percentile
+            percentile = 99 if percentile == 100 else percentile
+            return percentile
         except Exception as e:
             st.error(f"LR prediction error: {str(e)}")
             return None
@@ -426,9 +429,51 @@ class ModelManager:
             return offset
         except:
             return 0.01
+        
+    def get_coverage_error_at_threshold(self, score, method, threshold_percentile):
+        """Get coverage error for a specific method at the threshold percentile"""
+        if score not in self.coverage_data or method not in self.coverage_data[score]:
+            return 1.0  # Return high error if data not available
+        
+        try:
+            # Convert threshold percentile to index (1-99 -> 0-98)
+            idx = min(98, max(0, int(threshold_percentile) - 1))
+            coverage_errors = self.coverage_data[score][method].get('coverage_errors', [])
+            
+            if idx < len(coverage_errors):
+                return abs(coverage_errors[idx])
+            else:
+                return 1.0
+        except:
+            return 1.0    
     
-    def calculate_percentile_with_best_method(self, score, actual_score, features, min_percentile_constraint=None, use_max_percentile=False):
-        """Calculate percentile using all methods and select best based on coverage offset or max percentile
+    # def calculate_percentile_for_specific_method(self, score, actual_score, features, method):
+    #     """Calculate percentile using a specific method only"""
+    #     if method == 'LR':
+    #         return self.predict_lr(score, features, actual_score)
+    #     elif method == 'LQR':
+    #         return self.predict_lqr(score, features, actual_score)
+    #     elif method == 'NNQR':
+    #         return self.predict_nnqr(score, features, actual_score)
+    #     return None
+    #     """Get coverage error for a specific method at the threshold percentile"""
+    #     if score not in self.coverage_data or method not in self.coverage_data[score]:
+    #         return 1.0  # Return high error if data not available
+        
+    #     try:
+    #         # Convert threshold percentile to index (1-99 -> 0-98)
+    #         idx = min(98, max(0, int(threshold_percentile) - 1))
+    #         coverage_errors = self.coverage_data[score][method].get('coverage_errors', [])
+            
+    #         if idx < len(coverage_errors):
+    #             return abs(coverage_errors[idx])
+    #         else:
+    #             return 1.0
+    #     except:
+    #         return 1.0
+    
+    def calculate_percentile_with_best_method(self, score, actual_score, features, min_percentile_constraint=None, use_max_percentile=False, threshold=None):
+        """Calculate percentile using all methods and select best based on coverage error at threshold
         
         Args:
             score: Test type
@@ -436,66 +481,73 @@ class ModelManager:
             features: Demographic features
             min_percentile_constraint: If provided, only select methods that give percentile >= this value
             use_max_percentile: If True, select method with highest percentile instead of best coverage
+            threshold: Flag threshold percentile to use for selecting best method
         """
         results = {}
-        offsets = {}
+        coverage_errors = {}
         
         # Get predictions from all methods
         lr_percentile = self.predict_lr(score, features, actual_score)
         if lr_percentile is not None:
             results['LR'] = lr_percentile
-            offsets['LR'] = self.get_coverage_offset(score, 'LR', lr_percentile)
+            if threshold is not None:
+                coverage_errors['LR'] = self.get_coverage_error_at_threshold(score, 'LR', threshold)
         
         lqr_percentile = self.predict_lqr(score, features, actual_score)
         if lqr_percentile is not None:
             results['LQR'] = lqr_percentile
-            offsets['LQR'] = self.get_coverage_offset(score, 'LQR', lqr_percentile)
+            if threshold is not None:
+                coverage_errors['LQR'] = self.get_coverage_error_at_threshold(score, 'LQR', threshold)
         
         nnqr_percentile = self.predict_nnqr(score, features, actual_score)
         if nnqr_percentile is not None:
             results['NNQR'] = nnqr_percentile
-            offsets['NNQR'] = self.get_coverage_offset(score, 'NNQR', nnqr_percentile)
+            if threshold is not None:
+                coverage_errors['NNQR'] = self.get_coverage_error_at_threshold(score, 'NNQR', threshold)
         
         # Apply minimum percentile constraint if provided
         if min_percentile_constraint is not None:
             # Filter out methods that would create non-monotonic results
             valid_results = {method: pct for method, pct in results.items() 
                            if pct >= min_percentile_constraint}
-            valid_offsets = {method: offset for method, offset in offsets.items() 
-                           if method in valid_results}
+            valid_coverage_errors = {method: error for method, error in coverage_errors.items() 
+                                   if method in valid_results}
             
             # If no methods satisfy the constraint, fall back to highest percentile
             if not valid_results:
                 # Select method with highest percentile to maintain monotonicity
                 best_method = max(results, key=results.get)
                 best_percentile = results[best_method]
-                best_offset = offsets[best_method]
-                return results, offsets, best_method, best_percentile, best_offset
+                best_coverage_error = coverage_errors.get(best_method, 0)
+                return results, coverage_errors, best_method, best_percentile, best_coverage_error
             
-            # Use valid results/offsets for selection
+            # Use valid results/errors for selection
             results_for_selection = valid_results
-            offsets_for_selection = valid_offsets
+            errors_for_selection = valid_coverage_errors if valid_coverage_errors else {}
         else:
             results_for_selection = results
-            offsets_for_selection = offsets
+            errors_for_selection = coverage_errors
         
         # Find best method based on selection criteria
         if results_for_selection:
             if use_max_percentile:
                 # For maximum score, select method with highest percentile
                 best_method = max(results_for_selection, key=results_for_selection.get)
+            elif errors_for_selection:
+                # New logic: select method with minimum coverage error at threshold
+                best_method = min(errors_for_selection, key=errors_for_selection.get)
             else:
-                # Normal case: select method with minimum offset
-                best_method = min(offsets_for_selection, key=offsets_for_selection.get)
+                # Fallback: if no threshold provided, select method with highest percentile
+                best_method = max(results_for_selection, key=results_for_selection.get)
             
             best_percentile = results[best_method]
-            best_offset = offsets[best_method]
+            best_coverage_error = coverage_errors.get(best_method, 0)
         else:
             best_method = None
             best_percentile = None
-            best_offset = None
+            best_coverage_error = None
         
-        return results, offsets, best_method, best_percentile, best_offset
+        return results, coverage_errors, best_method, best_percentile, best_coverage_error
     
     def evaluate_flags(self, results, threshold, best_method=None, best_percentile=None):
         """Evaluate flagging for each method and agreement confidence"""
@@ -693,28 +745,39 @@ def generate_word_report(all_results, demographics):
     doc.add_heading('Test Results Summary', level=1)
     
     # Create summary table
-    summary_table = doc.add_table(rows=len(all_results)+1, cols=5)
+    summary_table = doc.add_table(rows=len(all_results)+1, cols=6)
     summary_table.style = 'Light Grid Accent 1'
     summary_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     
     # Headers
-    headers = ['Test', 'Raw Score', 'Percentile',  'Flag Status', 'Method Agreement']
+    headers = ['Test', 'Raw Score', 'Flag Threshold %', 'Predicted Percentile',  'Flag Status', 'Method Agreement']
     for i, header in enumerate(headers):
         cell = summary_table.cell(0, i)
         cell.text = header
         # Bold headers
         run = cell.paragraphs[0].runs[0]
         run.font.bold = True
-    
+    test_name_map = {
+    'DSF_raw': 'Digit Span Forward (DSF)',
+    'DSB_raw': 'Digit Span Backward (DSB)',
+    'SOC_raw': 'Speed of Comprehension (SOC)',
+    'SDMT_raw': 'Symbol Digit Modalities (SDMT)'
+}
+
     # Populate summary table
     for i, result in enumerate(all_results, 1):
-        summary_table.cell(i, 0).text = result['test_name'].replace('_raw', '').upper()
+        full_name = test_name_map.get(result['test_name'], result['test_name'])
+        summary_table.cell(i, 0).text = full_name
+        # summary_table.cell(i, 0).text = result['test_name'].replace('_raw', '').upper()
         summary_table.cell(i, 1).text = f"{result['actual_score']:.2f}"
-        summary_table.cell(i, 2).text = f"{result['best_percentile']:.0f}th"
+        summary_table.cell(i, 2).text = f"{result['threshold']:.2f}"
+        summary_table.cell(i, 3).text = f"{result['best_percentile']:.0f}th"
+        # summary_table.cell(i, 4).text = f"{result['best_percentile']:.0f}th"
+        # summary_table.cell(i, 5).text = f"{result['best_percentile']:.0f}th"
         # summary_table.cell(i, 3).text = result['interpretation']
         
         # Flag status with color
-        flag_cell = summary_table.cell(i, 3)
+        flag_cell = summary_table.cell(i, 4)
         flag_cell.text = result['flag_status']
         if result['flag_status'] == 'FLAGGED':
             run = flag_cell.paragraphs[0].runs[0]
@@ -723,7 +786,7 @@ def generate_word_report(all_results, demographics):
             run = flag_cell.paragraphs[0].runs[0]
             run.font.color.rgb = RGBColor(39, 174, 96)  # Green
         
-        summary_table.cell(i, 4).text = result['agreement_ratio']
+        summary_table.cell(i, 5).text = result['agreement_ratio']
     
     doc.add_page_break()
     
@@ -732,7 +795,8 @@ def generate_word_report(all_results, demographics):
     
     for idx, result in enumerate(all_results, 1):
         # Test header
-        doc.add_heading(f"{idx}. {result['test_name'].replace('_raw', '').upper()}", level=2)
+        full_name = test_name_map.get(result['test_name'], result['test_name'])
+        doc.add_heading(f"{idx}. {full_name}", level=2)
         
         # Create detailed table for this test
         detail_table = doc.add_table(rows=5, cols=2)
@@ -758,7 +822,7 @@ def generate_word_report(all_results, demographics):
         method_table.style = 'Light Grid Accent 1'
         
         # Headers
-        headers = ['Method', 'Percentile', 'Flag Status', 'Coverage Offset']
+        headers = ['Method', 'Percentile', 'Flag Status', 'Coverage Error']
         for i, header in enumerate(headers):
             cell = method_table.cell(0, i)
             cell.text = header
@@ -770,7 +834,7 @@ def generate_word_report(all_results, demographics):
             method_table.cell(i, 0).text = method
             method_table.cell(i, 1).text = f"{data['percentile']:.1f}th"
             method_table.cell(i, 2).text = data['flag']
-            method_table.cell(i, 3).text = f"{data['offset']:.4f}"
+            method_table.cell(i, 3).text = f"{data.get('coverage_error', data.get('offset', 0)):.4f}"
         
         if idx < len(all_results):
             doc.add_paragraph()
@@ -786,19 +850,19 @@ def generate_word_report(all_results, demographics):
     
     summary_text = f"""
     This neuropsychological assessment included {len(all_results)} cognitive tests. 
-    Of these, {len(flagged_tests)} test(s) fell below the clinical threshold.
+    Of these, {len(flagged_tests)} test(s) fell below the set Flag threshold.
     
     """
     
     if flagged_tests:
-        summary_text += "The following tests showed clinically significant findings:\n"
+        summary_text += "The following tests were 'FLAGGED' below the set Threshold Limit:\n"
         for test in flagged_tests:
-            summary_text += f"• {test['test_name'].replace('_raw', '').upper()}: {test['best_percentile']:.0f}th percentile\n"
+            summary_text += f"• {test['test_name'].replace('_raw', '').upper()}: {test['best_percentile']:.0f}th percentile \n"
     else:
-        summary_text += "All test scores fell within or above the expected range for the subject's demographic profile."
+        summary_text += "All test scores fell within or above the 'Set Threshold' for the subject's demographic profile."
     
     doc.add_paragraph(summary_text)
-    
+        
     # Disclaimer
     doc.add_paragraph()
     doc.add_heading('Disclaimer', level=2)
@@ -832,6 +896,7 @@ def main():
         st.markdown('<div class="main-header">Comparative Neuropsychological Percentile Estimation Based on Irish Jockeys Data</div>', unsafe_allow_html=True)
     
     # Research description
+   
     st.markdown("""
     <div style="background-color: #e8f4f8; border-left: 4px solid #1f77b4; padding: 1rem; 
                 border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.95rem;">
@@ -1008,6 +1073,7 @@ def main():
             model_manager.available_scores,
             format_func=lambda x: test_name_mapping.get(x, x.replace('_raw', '').upper())
         )
+    
 
     with col2:
         threshold = st.number_input(
@@ -1017,8 +1083,8 @@ def main():
             value=5,
             step=1,
             help="Flag scores below this percentile"
-        )    
-    
+        )
+
     with col3:
         # Get the range for the selected test
         min_score = score_ranges.get(selected_score, {}).get('min', 0)
@@ -1056,9 +1122,11 @@ def main():
                     if min_percentile_constraint is None or prev_calc['percentile'] > min_percentile_constraint:
                         min_percentile_constraint = prev_calc['percentile']
             
-            # Calculate with constraint if applicable
-            results, offsets, best_method, best_percentile, best_offset = model_manager.calculate_percentile_with_best_method(
-                selected_score, actual_score, features, min_percentile_constraint=min_percentile_constraint
+            # Calculate with constraint if applicable, passing the threshold for best method selection
+            results, coverage_errors, best_method, best_percentile, best_coverage_error = model_manager.calculate_percentile_with_best_method(
+                selected_score, actual_score, features, 
+                min_percentile_constraint=min_percentile_constraint,
+                threshold=threshold
             )
             
             if results:
@@ -1082,10 +1150,10 @@ def main():
                 # Store current calculation in session state
                 st.session_state.current_results = {
                     'results': results,
-                    'offsets': offsets,
+                    'coverage_errors': coverage_errors,
                     'best_method': best_method,
                     'best_percentile': best_percentile,
-                    'best_offset': best_offset,
+                    'best_coverage_error': best_coverage_error,
                     'flags': flags,
                     'agreement_level': agreement_level,
                     'agreement_color': agreement_color,
@@ -1101,10 +1169,10 @@ def main():
     # Display results if they exist in session state
     if 'current_results' in st.session_state and st.session_state.current_results:
         results = st.session_state.current_results['results']
-        offsets = st.session_state.current_results['offsets']
+        coverage_errors = st.session_state.current_results.get('coverage_errors', {})
         best_method = st.session_state.current_results['best_method']
         best_percentile = st.session_state.current_results['best_percentile']
-        best_offset = st.session_state.current_results['best_offset']
+        best_coverage_error = st.session_state.current_results.get('best_coverage_error', 0)
         flags = st.session_state.current_results['flags']
         agreement_level = st.session_state.current_results['agreement_level']
         agreement_color = st.session_state.current_results['agreement_color']
@@ -1207,7 +1275,7 @@ def main():
                 """, unsafe_allow_html=True)
         
         # Score Improvement Guidance
-        # st.markdown('<div class="section-header">💡 Score Improvement Guidance</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">💡 Score Improvement Guidance</div>', unsafe_allow_html=True)
         
         # Calculate guidance based on current status
         guidance_message = ""
@@ -1219,7 +1287,7 @@ def main():
         
         if best_flagged:
             # User is below threshold - find score needed to cross threshold
-            test_score = int(current_actual) + 1
+            test_score = float(current_actual) + 1
             found_threshold_score = None
             last_valid_percentile = best_percentile  # Track last valid percentile for monotonicity
             max_achievable_percentile = best_percentile  # Track the maximum achievable percentile
@@ -1228,7 +1296,7 @@ def main():
             while test_score <= max_score:
                 # Calculate percentile for this test score with monotonicity constraint
                 test_results, _, test_best_method, test_best_percentile, _ = model_manager.calculate_percentile_with_best_method(
-                    current_score, float(test_score), features, min_percentile_constraint=last_valid_percentile
+                    current_score, float(test_score), features, min_percentile_constraint=last_valid_percentile, threshold= current_threshold
                 )
                 
                 if test_best_percentile:
@@ -1345,7 +1413,7 @@ def main():
                             method: {
                                 'percentile': results[method],
                                 'flag': 'FLAGGED' if flags[method] else 'PASS',
-                                'offset': offsets.get(method, 0)
+                                'coverage_error': coverage_errors.get(method, 0)
                             }
                             for method in results
                         },
@@ -1389,15 +1457,15 @@ def main():
             st.markdown("""
             <div class="info-box">
             <strong>Step 2. Test Settings</strong><br>
-            Select test and set 'Flag' threshold above
+            Select test and set the 'FLAG' threshold above
             </div>
             """, unsafe_allow_html=True)
         
         with col3:
             st.markdown("""
             <div class="info-box">
-            <strong>Step 3. Estimate</strong><br>
-            Enter 'Actual' score and click Estimate
+            <strong>Step 3. Estimate </strong><br>
+            Enter score and click Calculate
             </div>
             """, unsafe_allow_html=True)
     
@@ -1405,7 +1473,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style="background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 8px; 
-                padding: 1rem; margin-top: -0.2rem; margin-bottom: 2rem; color: #856404;">
+                padding: 1rem; margin-top: 1rem; margin-bottom: 2rem; color: #856404;">
         <strong>⚠️ Important Disclaimer:</strong><br>
         This application is intended primarily as a research tool for exploring and comparing normative modeling approaches. 
         Users are advised to interpret results with caution and avoid relying solely on its outputs for critical clinical decisions. 
