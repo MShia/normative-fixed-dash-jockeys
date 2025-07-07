@@ -714,7 +714,7 @@ def generate_word_report(all_results, demographics):
         section.right_margin = Inches(1)
     
     # Title
-    title = doc.add_heading('Neuropsychological Assessment Report', 0)
+    title = doc.add_heading('Neuropsychological Assessment Report based on Retrospective Data (2010 -2024) from Irish Jockeys', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     # Report metadata
