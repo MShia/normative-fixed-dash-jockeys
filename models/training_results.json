@@ -8,19 +8,17 @@
     "lr": {
       "mse": 5.038467568110998,
       "mae": 1.7701634507088002,
-      "r_squared": 0.037240979110188976
+      "r_squared": 0.037240979110188976,
+      "mean_coverage_error": 0.014678568632057012,
+      "max_coverage_error": 0.04527131782945748
     },
     "lqr": {
-      "mean_mse": 10.428050448019233,
-      "quantiles_trained": 99
+      "quantiles_trained": 99,
+      "mean_coverage_error": 0.02669328948398718,
+      "max_coverage_error": 0.047260981912144784
     },
     "nnqr": {
-      "mse": 5.156866550445557,
-      "mae": 1.7919615507125854,
-      "coverage_error": 0.03573721713256598,
-      "final_train_loss": 0.5901941220427669,
-      "final_val_loss": 0.624556839466095,
-      "epochs_trained": 74
+      "error": "x and y must have same first dimension, but have shapes (99,) and (9900,)"
     }
   },
   "DSB_raw": {
@@ -32,19 +30,17 @@
     "lr": {
       "mse": 3.674730470726855,
       "mae": 1.5361100987195042,
-      "r_squared": 0.05365475507191031
+      "r_squared": 0.05365475507191031,
+      "mean_coverage_error": 0.03130249867091972,
+      "max_coverage_error": 0.08421052631578946
     },
     "lqr": {
-      "mean_mse": 6.555104853849111,
-      "quantiles_trained": 99
+      "quantiles_trained": 99,
+      "mean_coverage_error": 0.02984051036682616,
+      "max_coverage_error": 0.15105263157894738
     },
     "nnqr": {
-      "mse": 4.049983501434326,
-      "mae": 1.514854073524475,
-      "coverage_error": 0.030451887293992577,
-      "final_train_loss": 0.4907194525003433,
-      "final_val_loss": 0.5651106834411621,
-      "epochs_trained": 59
+      "error": "x and y must have same first dimension, but have shapes (99,) and (9900,)"
     }
   },
   "SOC_raw": {
@@ -56,19 +52,17 @@
     "lr": {
       "mse": 293.0876744835425,
       "mae": 13.825438888683625,
-      "r_squared": 0.13479182632469822
+      "r_squared": 0.13479182632469822,
+      "mean_coverage_error": 0.02093200041653651,
+      "max_coverage_error": 0.05123711340206183
     },
     "lqr": {
-      "mean_mse": 568.94340987515,
-      "quantiles_trained": 99
+      "quantiles_trained": 99,
+      "mean_coverage_error": 0.024554826616682297,
+      "max_coverage_error": 0.05989690721649488
     },
     "nnqr": {
-      "mse": 239.8640899658203,
-      "mae": 12.202066421508789,
-      "coverage_error": 0.054049776111631795,
-      "final_train_loss": 4.351447011149207,
-      "final_val_loss": 4.525608539581299,
-      "epochs_trained": 62
+      "error": "x and y must have same first dimension, but have shapes (99,) and (9900,)"
     }
   },
   "SDMT_raw": {
@@ -80,19 +74,17 @@
     "lr": {
       "mse": 127.46616195685638,
       "mae": 8.86721204180036,
-      "r_squared": 0.09780853000614376
+      "r_squared": 0.09780853000614376,
+      "mean_coverage_error": 0.02085401821835929,
+      "max_coverage_error": 0.06356589147286823
     },
     "lqr": {
-      "mean_mse": 259.0737602303019,
-      "quantiles_trained": 99
+      "quantiles_trained": 99,
+      "mean_coverage_error": 0.025601753973847004,
+      "max_coverage_error": 0.07289405684754521
     },
     "nnqr": {
-      "mse": 114.10893249511719,
-      "mae": 8.287004470825195,
-      "coverage_error": 0.023971497924986294,
-      "final_train_loss": 2.717879608620045,
-      "final_val_loss": 2.7290761470794678,
-      "epochs_trained": 136
+      "error": "x and y must have same first dimension, but have shapes (99,) and (9900,)"
     }
   }
 }
